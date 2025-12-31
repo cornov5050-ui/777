@@ -26,7 +26,7 @@ threading.Thread(target=run_dummy_server, daemon=True).start()
 # --- ASOSIY MA'LUMOTLAR ---
 API_ID = 20429961
 API_HASH = '4ad3a141f391112f26aa88ee88f2c7b0'
-BOT_TOKEN = '8161847784:AAEo9MM5XjGX8cKkDk-ViYIMm1tbb1h-oCE'
+BOT_TOKEN = '8161847784:AAGFYJ2bsdHRuwgrZPnhwU4MEQgrDmUI7Qs'
 
 DB_FILE = 'users_db.json'
 
