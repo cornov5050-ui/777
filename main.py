@@ -2,13 +2,28 @@ import asyncio
 import re
 import json
 import os
+import http.server
+import socketserver
+import threading
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import InputMediaDice
 from telethon import Button
 
-# --- SOZLAMALAR (Bular o'zgarmasin) ---
+# --- RENDER UCHUN SOXTA PORT OCHISH (MUHIM) ---
+def run_dummy_server():
+    # Render avtomatik taqdim etadigan portni oladi, bo'lmasa 8080 ishlatadi
+    PORT = int(os.environ.get("PORT", 8080))
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Render uchun soxta server {PORT} portda ishga tushdi")
+        httpd.serve_forever()
+
+# Serverni alohida oqimda (thread) ishga tushiramiz
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
+# --- ASOSIY MA'LUMOTLAR ---
 API_ID = 20429961
 API_HASH = '4ad3a141f391112f26aa88ee88f2c7b0'
 BOT_TOKEN = '8161847784:AAEo9MM5XjGX8cKkDk-ViYIMm1tbb1h-oCE'
@@ -76,11 +91,10 @@ async def setup_user_handlers(client, owner_id):
         await bot.send_message(owner_id, f"🛑 To'xtatildi!")
 
 async def main():
-    # Botni ishga tushirish
     await bot.start(bot_token=BOT_TOKEN)
     print("🚀 Bot ishga tushdi!")
 
-    # Bazadagi sessiyalarni qayta tiklash
+    # Bazadagi sessiyalarni yuklash
     for cid, info in db.items():
         if info.get('session'):
             try:
@@ -95,10 +109,7 @@ async def main():
     @bot.on(events.NewMessage(pattern='/start'))
     async def start_handler(event):
         cid = str(event.chat_id)
-        buttons = [
-            [Button.inline("👤 Mening Profilim", b"profile")], 
-            [Button.inline("📝 Eslatma", b"eslatma")]
-        ]
+        buttons = [[Button.inline("👤 Mening Profilim", b"profile")], [Button.inline("📝 Eslatma", b"eslatma")]]
 
         if cid in db and db[cid].get('logged_in'):
             await event.respond("🏠 Asosiy menyu", buttons=buttons)
@@ -112,10 +123,8 @@ async def main():
         cid = str(event.chat_id)
         if event.data == b"profile":
             info = db.get(cid, {})
-            if info.get('logged_in'):
-                text = f"👤 Profil:\n📞 Raqam: `{info.get('phone')}`\n🆔 Nik: {info.get('name')}\n✅ Ulangan"
-            else:
-                text = "❌ Ro'yxatdan o'ting!"
+            text = f"👤 Profil:\n📞 Raqam: `{info.get('phone')}`\n🆔 Nik: {info.get('name')}\n✅ Ulangan" if info.get(
+                'logged_in') else "❌ Ro'yxatdan o'ting!"
             await event.answer(text, alert=True)
         elif event.data == b"eslatma":
             await event.answer("📝 Eslatma:\n/01 boshlaydi 🔥\n/02 tugatadi 🛑", alert=True)
@@ -125,10 +134,9 @@ async def main():
         cid = str(event.chat_id)
         if cid not in db or db[cid].get('logged_in') or event.text.startswith('/'): 
             return
-        
         text = event.text.strip()
 
-        if db[cid].get('step') == 'phone' and text.startswith('+'):
+        if db[cid]['step'] == 'phone' and text.startswith('+'):
             db[cid]['phone'] = text
             cl = TelegramClient(StringSession(), API_ID, API_HASH)
             await cl.connect()
@@ -141,36 +149,22 @@ async def main():
             except Exception as e:
                 await event.respond(f"❌ Xato: {e}")
 
-        elif db[cid].get('step') == 'code':
+        elif db[cid]['step'] == 'code':
             client = user_clients.get(event.chat_id)
             try:
-                # Kodni tozalab kiritish (nuqtalarni olib tashlash)
-                clean_code = clean_input(text)
-                await client.sign_in(db[cid]['phone'], clean_code, phone_code_hash=db[cid]['hash'])
+                await client.sign_in(db[cid]['phone'], clean_input(text), phone_code_hash=db[cid]['hash'])
                 await success_login(event, client, event.chat_id)
             except SessionPasswordNeededError:
                 db[cid]['step'] = '2fa'
                 save_db(db)
-                await event.respond("🔐 2-bosqichli parolni yuboring: 🔑")
+                await event.respond("🔐 2-bosqichli parolni nuqtalar bilan yuboring: 🔑")
             except Exception as e:
                 await event.respond(f"❌ Xato: {e}")
 
-        elif db[cid].get('step') == '2fa':
-            client = user_clients.get(event.chat_id)
-            try:
-                await client.sign_in(password=text)
-                await success_login(event, client, event.chat_id)
-            except Exception as e:
-                await event.respond(f"❌ Parol xato: {e}")
-
     async def success_login(event, client, chat_id):
         me = await client.get_me()
-        db[str(chat_id)].update({
-            'logged_in': True, 
-            'session': client.session.save(), 
-            'name': me.first_name, 
-            'step': 'done'
-        })
+        db[str(chat_id)].update(
+            {'logged_in': True, 'session': client.session.save(), 'name': me.first_name, 'step': 'done'})
         save_db(db)
         await event.respond(f"🎉 Profil ulandi!\n👤 {me.first_name}\n\n📝 /01 boshlaydi /02 tugatadi 🔥")
         asyncio.create_task(setup_user_handlers(client, chat_id))
@@ -179,3 +173,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
